@@ -7,11 +7,11 @@ import TourKit
 enum Tour {
     static let pages: [(image: String, title: LocalizedStringKey, description: LocalizedStringKey)] = [
         ("tour-welcome", "欢迎使用 UU远程伴侣",
-         "用平板或手机通过 UU远程 操控这台 Mac 时，它会自动准备一块和你的设备尺寸完全一致的屏幕。"),
+         "用电脑、平板或手机通过 UU远程 操控这台 Mac 时，它会按设备设置准备虚拟屏幕。"),
         ("tour-match", "一连上，画面就刚好铺满",
          "认出连进来的是哪台设备，几秒内换上合适的屏幕，没有黑边、文字清晰；断开后一切恢复原样。"),
         ("tour-physical", "远程时只留一块屏幕",
-         "可以在设置里打开：远程期间暂时熄灭 Mac 自己的屏幕和外接显示器，窗口不会跑到你看不见的地方。用电脑连接时不受影响。"),
+         "可以在设置里打开：远程期间暂时熄灭 Mac 自己的屏幕和外接显示器，窗口不会跑到你看不见的地方。电脑也可以自动熄屏；手动恢复后，本次连接保持亮屏。"),
         ("tour-safety", "万一出问题，也能马上找回",
          "坐在 Mac 前按 ⌃ control + ⌥ option + ⌘ command + 9，所有屏幕立刻亮起来；还可以打开后台守护自动照看；重启 Mac 也一定能恢复。"),
         ("tour-setup", "还差两步就能用了",

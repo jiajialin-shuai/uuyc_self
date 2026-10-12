@@ -2,8 +2,11 @@
 import Foundation
 
 enum Log {
-    private static let url = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("Logs/UUDisplay.log")
+    private static let url: URL = {
+        if ConfigStore.isIsolated { return ConfigStore.dir.appendingPathComponent("UUDisplay.log") }
+        return FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Logs/UUDisplay.log")
+    }()
     private static let fmt: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"

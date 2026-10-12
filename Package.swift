@@ -12,10 +12,13 @@ let package = Package(
     ],
     targets: [
         .target(name: "CGVirtualDisplayBridge"),
+        .target(name: "UUDisplayCore"),
+        .testTarget(name: "UUDisplayCoreTests", dependencies: ["UUDisplayCore"]),
         .executableTarget(name: "vdprobe", dependencies: ["CGVirtualDisplayBridge"]),
         .executableTarget(name: "uuprobe"),
         .executableTarget(name: "uuwatch"),
         .executableTarget(name: "UUDisplay", dependencies: [
+            "UUDisplayCore",
             "CGVirtualDisplayBridge",
             .product(name: "PermissionFlow", package: "PermissionFlow"),
             .product(name: "SystemSettingsKit", package: "PermissionFlow"),

@@ -1,3 +1,4 @@
+import UUDisplayCore
 // 菜单栏：状态 / 设置 / 默认设备 / 暂停 / 开机自启 / 退出
 import AppKit
 import ServiceManagement
@@ -64,6 +65,9 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let restore = action("立即恢复所有屏幕（⌃⌥⌘+9）", #selector(restorePhysical))
         restore.isEnabled = coordinator.display.physicalOff || PhysicalDisplays.pending != nil
         menu.addItem(restore)
+        let blackout = action("立即熄灭 Mac 屏幕（⌃⌥⌘+8）", #selector(blackoutPhysical))
+        blackout.isEnabled = coordinator.canBlackout
+        menu.addItem(blackout)
         let physical = action("远程时熄灭 Mac 屏幕", #selector(toggleDisablePhysical))
         physical.state = store.config.shouldDisablePhysical ? .on : .off
         menu.addItem(physical)
@@ -79,7 +83,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         none.representedObject = ""
         none.state = store.config.defaultDevice == nil ? .on : .off
         sub.addItem(none)
-        for d in store.config.devices where d.kind != .computer {
+        for d in store.config.devices where d.shouldAdjust {
             let it = action("\(d.name)（\(d.sizeLabel)）", #selector(pickDefault(_:)))
             it.representedObject = d.name
             it.state = store.config.defaultDevice == d.name ? .on : .off
@@ -111,6 +115,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     @objc private func showDisplaySettings() { openSettings(.fallback) }
 
     @objc private func restorePhysical() { coordinator.restorePhysical() }
+    @objc private func blackoutPhysical() { coordinator.blackoutPhysical() }
 
     @objc private func toggleDisablePhysical() { coordinator.setDisablePhysical(!store.config.shouldDisablePhysical) }
 

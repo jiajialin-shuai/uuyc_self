@@ -1,10 +1,35 @@
+# uuyc_self：电脑连接自动熄屏分支
+
+基于 [aoyamashou/UUyc-companion](https://github.com/aoyamashou/UUyc-companion) 的个人 fork，保留原作者署名和 MIT 许可证。本分支增加电脑连接支持；上游 v1.0.0 下载包不包含这些改动。
+
+- 电脑、手机、平板均可配置自动处理开关、虚拟屏尺寸和高清缩放。新电脑默认 1920×1080、普通缩放；已有电脑配置仍保持旧行为，需手动开启。
+- 在「设置这台 Mac」中开启「远程时熄灭 Mac 的屏幕」。虚拟屏上线并成功设为主屏后，才熄灭物理屏。
+- 远程时按 **⌃⌥⌘9** 或点击「立即恢复所有屏幕」：保留虚拟屏，本次连接保持亮屏。恢复后的物理屏是扩展桌面，画面不一定与远程相同。
+- 按 **⌃⌥⌘8** 或点击「立即熄灭 Mac 屏幕」：虚拟屏准备好时可用，主动取消本次保持亮屏。断开后恢复，下次连接重新执行自动策略。
+- 初次连接时请在 UU 的「显示」面板确认选中了 `UUyc companion · 设备名`。虚拟屏沿用上游 60 Hz。
+- 连接识别支持 UU 覆盖窗口和被控服务的活跃显示器唤醒请求，后台守护使用相同判断。若读不到控制端名称，请在设备设置中明确选择默认设备，并按 Windows 显示器调整尺寸。
+
+构建：
+
+```sh
+git clone https://github.com/jiajialin-shuai/uuyc_self.git
+cd uuyc_self
+git switch feat/computer-auto-blackout
+scripts/test.sh
+SIGN_IDENTITY=- scripts/build-app.sh
+```
+
+App 输出为 `build/UUyc companion.app`。辅助功能权限按 macOS 引导由用户开启；建议在熄屏前开启「后台守护」。开发与验收记录见 [电脑连接自动熄屏](docs/COMPUTER_AUTO_BLACKOUT.md)。
+
+---
+
 <div align="center">
 
 <img src="Assets/AppIcon/AppIcon-1024.png" width="128" alt="UU远程伴侣图标">
 
 # UU远程伴侣（UUyc companion）
 
-**用平板或手机通过 UU远程 操控 Mac 时，自动准备一块尺寸刚好的屏幕。**
+**用电脑、平板或手机通过 UU远程 操控 Mac 时，自动准备一块尺寸刚好的屏幕。**
 
 画面铺满、没有黑边、文字清晰；断开后一切恢复原样。
 
@@ -40,7 +65,7 @@ UU远程 的 Mac 被控端没有 Windows 版那样的「超级屏」（虚拟屏
 | --- | --- |
 | 🖥️ 自动准备虚拟屏幕 | 认出连进来的是哪台设备，几秒内换上合适尺寸的屏幕，高清显示 |
 | 📱 每台设备单独设置 | 自动读取 UU远程 里的设备列表，按名称预填平板、手机、电脑和屏幕尺寸，可以自定义 |
-| 💻 用电脑连接时不打扰 | 用另一台电脑连接时，什么也不做 |
+| 💻 电脑连接自动处理 | 可设置 1080p、2K、4K 或自定义虚拟屏幕，按设置自动熄屏 |
 | 🌑 远程时熄灭 Mac 的屏幕 | 可选。远程期间只留虚拟屏幕，断开后自动亮回来 |
 | ⌨️ 一键找回屏幕 | 坐在 Mac 前按 **⌃ control + ⌥ option + ⌘ command + 9**，所有屏幕立刻亮起来 |
 | 🛡️ 后台守护 | 可选。万一程序意外退出或卡住，后台的小助手会自动把屏幕点亮 |
@@ -51,8 +76,8 @@ UU远程 的 Mac 被控端没有 Windows 版那样的「超级屏」（虚拟屏
 <div align="center">
 <img src="docs/images/settings.png" width="80%" alt="设置窗口">
 <p><sub>设置窗口：上面的图示说明了工作方式，点按钮展开对应的设置</sub></p>
-<img src="docs/images/settings-devices.png" width="80%" alt="设置平板和手机">
-<p><sub>设置平板和手机：为每台设备选择屏幕尺寸</sub></p>
+<img src="docs/images/settings-devices.png" width="80%" alt="设置远程设备">
+<p><sub>设置远程设备：为每台设备选择屏幕尺寸</sub></p>
 <img src="docs/images/settings-recover.png" width="80%" alt="找回屏幕的方法">
 <p><sub>找回屏幕的方法：快捷键与后台守护</sub></p>
 </div>
@@ -104,7 +129,7 @@ xattr -dr com.apple.quarantine "/Applications/UUyc companion.app"
 1. **功能介绍**：5 页图文，介绍它能做什么
 2. **授权**：允许它读取 UU远程 里显示的设备名称。点「授权」后会打开系统设置，旁边出现一个小窗口，把里面的 UU远程伴侣 拖进列表就好
    - 这一项在 macOS 27 里叫「**设备控制和数据访问**」，更早的版本叫「**辅助功能**」
-3. **设置平板和手机**：软件会自动读出你的 UU远程 账号里已登录的设备，确认每台设备的类型和屏幕尺寸后点「保存」。**屏幕尺寸务必核对**，见下一节
+3. **设置远程设备**：软件会自动读出你的 UU远程 账号里已登录的设备，确认每台设备的类型和屏幕尺寸后点「保存」。**屏幕尺寸务必核对**，见下一节
 
 之后它会待在**菜单栏**里（图标是两块叠在一起的屏幕），平板或手机连上就会自动工作。
 
@@ -117,14 +142,14 @@ xattr -dr com.apple.quarantine "/Applications/UUyc companion.app"
 | 软件认识的型号 | 直接填好分辨率：OPPO Pad 3 Pro、iPad mini、OPPO Reno13 Pro；名字带「iPad Air」「iPad Pro」的按 **11 英寸**填写（13 英寸请在下拉框里改选）；名字带「iPhone」的一律按 **iPhone 17** 填写（其他型号请核对） |
 | 软件不认识的平板 | 先按 iPad Air 11 英寸（2360 × 1640）填写，**不一定适合你的设备** |
 | 软件不认识的手机 | 先按常见安卓手机（2400 × 1080）填写，**不一定适合你的设备** |
-| 电脑 | 不需要尺寸，连上时什么也不做 |
+| 电脑 | 新配置使用 1920×1080、普通缩放，可自行修改；旧配置须开启「自动处理」 |
 
 > 设备类型也是按名字判断的：UU远程「电脑」分组里的都当作电脑；其余名字带「Pad」的当作平板，不带的当作手机。判断错了，在这台设备那一行点选正确的类型即可。
 
 如果你的设备不在「认识的型号」里，或者连上后画面有黑边，请查到它的屏幕分辨率，再手动填写：
 
 1. **查分辨率**：在设备的官方规格页找「屏幕分辨率」，或者搜索「设备型号 + 分辨率」。例如 iPad Air 11 英寸是 2360 × 1640
-2. 点菜单栏图标 › **设置…** › **设置平板和手机**
+2. 点菜单栏图标 › **设置…** › **设置远程设备**
 3. 在这台设备的尺寸下拉框里选「**自定义**」
 4. 填写**宽**和**高**：
    - 按**横屏**填写：两个数字中**大的填「宽」，小的填「高」**
@@ -138,7 +163,7 @@ xattr -dr com.apple.quarantine "/Applications/UUyc companion.app"
 
 点菜单栏图标 › **设置…**
 
-- **设置平板和手机**：每台设备用什么屏幕尺寸；认不出设备时默认当作哪台
+- **设置远程设备**：每台设备用什么屏幕尺寸；认不出设备时默认当作哪台
 - **设置这台 Mac**：开机时自动打开、自动准备虚拟屏幕、远程时熄灭 Mac 的屏幕
 - **找回屏幕的方法**：打开「远程时熄灭 Mac 的屏幕」后才能点，可以在这里打开后台守护
 
@@ -171,7 +196,7 @@ xattr -dr com.apple.quarantine "/Applications/UUyc companion.app"
 <details>
 <summary><b>连上后画面还是有黑边？</b></summary>
 
-1. 在「设置平板和手机」里，确认这台设备选的屏幕尺寸和它的实际分辨率一致（横屏）
+1. 在「设置远程设备」里，确认这台设备选的屏幕尺寸和它的实际分辨率一致（横屏）
 2. 在平板或手机的 UU远程 里打开「显示」面板，确认选中的显示屏是「UUyc companion · 设备名」
 </details>
 
@@ -190,7 +215,7 @@ xattr -dr com.apple.quarantine "/Applications/UUyc companion.app"
 <details>
 <summary><b>用另一台电脑连接时会怎样？</b></summary>
 
-在「设置平板和手机」里，类型为「电脑」的设备连上时，本软件什么也不做。
+在「设置远程设备」中开启电脑的「自动处理」并设置尺寸，即可使用虚拟屏。全局「远程时熄灭 Mac 的屏幕」开启时会自动熄屏；手动恢复后本次保持亮屏。
 </details>
 
 ## 卸载
@@ -248,11 +273,11 @@ cd UUyc-companion && SIGN_IDENTITY=- scripts/build-app.sh
 
 ## English
 
-**UUyc companion** is a macOS menu bar utility for people who control their Mac from an iPad or phone with [UU Remote](https://uuyc.163.com/) (NetEase).
+**UUyc companion** is a macOS menu bar utility for people who control their Mac from a computer, iPad or phone with [UU Remote](https://uuyc.163.com/) (NetEase).
 
-When a tablet or phone connects, it creates a HiDPI virtual display that exactly matches the device's resolution and makes it the main display, so the remote view fills the screen with no black bars. It can optionally turn off the Mac's own displays during the session, and everything is restored when the session ends.
+When a configured computer, tablet or phone connects, it creates a HiDPI virtual display that exactly matches the device's resolution and makes it the main display, so the remote view fills the screen with no black bars. It can optionally turn off the Mac's own displays during the session, and everything is restored when the session ends.
 
-- Reads the device list from UU Remote and pre-fills a resolution for each device; computers are left alone
+- Reads the device list from UU Remote and pre-fills a resolution for each device; computers can opt into automatic virtual-screen and physical-screen control
 - Emergency shortcut **⌃⌥⌘9** turns all displays back on; an optional background watchdog restores them if the app crashes or hangs
 - No network access, no data collection
 - Requires macOS 14+; tested on macOS 27 (Apple Silicon)

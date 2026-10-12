@@ -1,3 +1,4 @@
+import UUDisplayCore
 // UU远程伴侣：本机被 UU远程 控制时，按控制端设备自动建虚拟屏并设为主屏，断开后还原
 // 调试：UUDisplay --simulate "<设备名>" [秒数=10]  模拟一次连入/断开（不依赖 UU）
 //      UUDisplay --simulate "A>B" 8            先按 A 建屏，3 秒后识别为 B 重建
@@ -12,6 +13,11 @@ import PermissionFlow
 import ServiceManagement
 import SwiftUI
 
+if CommandLine.arguments.contains("--preview-settings"), !ConfigStore.isIsolated {
+    print("设置预览必须提供独立的 UUDISPLAY_DATA_DIR，避免修改真实配置。")
+    exit(1)
+}
+
 if CommandLine.arguments.contains("--watchdog") { Watchdog.run() }
 
 if CommandLine.arguments.contains("--dump-devices") {
@@ -19,7 +25,7 @@ if CommandLine.arguments.contains("--dump-devices") {
     guard let devices = UUReader.readDevices() else { print("未读到 UU 主窗口"); exit(1) }
     for d in devices {
         let cfg = DeviceConfig.make(name: d.name, kind: Presets.guessKind(name: d.name, isComputerGroup: d.isComputerGroup))
-        let size = cfg.kind == .computer ? "不切换" : cfg.sizeLabel
+        let size = cfg.shouldAdjust ? cfg.sizeLabel : "不处理"
         print("\(d.isSelf ? "（本机，排除）" : "")\(d.name)\t→ \(cfg.kind.label)\t\(size)")
     }
     print("控制端：\(UUReader.readControllers() ?? [])")
@@ -35,10 +41,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var statusBar: StatusBarController?
     private var heartbeatTimer: Timer?
     private var hotKeyRef: EventHotKeyRef?
+    private var blackoutHotKeyRef: EventHotKeyRef?
+    private var hotKeyHandlerRef: EventHandlerRef?
     private var demoController: PermissionFlowController?
     private var terminating = false
 
     func applicationDidFinishLaunching(_ note: Notification) {
+        if CommandLine.arguments.contains("--preview-settings") {
+            settings.setDisablePhysical = { ConfigStore.shared.config.disablePhysical = $0 }
+            settings.setPaused = { ConfigStore.shared.config.paused = $0 }
+            settings.show(pane: .controller)
+            return
+        }
         Log.info("启动 UUDisplay，辅助功能权限：\(UUReader.isTrusted)")
         statusBar = StatusBarController(coordinator: coordinator,
                                         openSettings: { [weak self] in self?.settings.show(pane: $0) },
@@ -49,6 +63,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.setDisablePhysical = { [weak self] in self?.coordinator.setDisablePhysical($0) }
         settings.setPaused = { [weak self] in self?.coordinator.setPaused($0) }
         settings.restorePhysical = { [weak self] in self?.coordinator.restorePhysical() }
+        settings.blackoutPhysical = { [weak self] in self?.coordinator.blackoutPhysical() }
+        settings.canBlackoutPhysical = { [weak self] in self?.coordinator.canBlackout ?? false }
         settings.openTour = { [weak self] in self?.tour.show() }
         coordinator.onChange = { [weak self] in self?.statusBar?.refresh() }
 
@@ -157,6 +173,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateCancel
     }
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        settings.show()
+        return false
+    }
+
     /// 看门狗以 LaunchAgent 形式安装（KeepAlive）：仅当用户在设置里开启时安装，否则确保已卸载
     private func registerWatchdog() {
         guard Bundle.main.bundlePath.hasSuffix(".app") else {
@@ -174,16 +195,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func installHotkey() {
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         let me = Unmanaged.passUnretained(self).toOpaque()
-        InstallEventHandler(GetApplicationEventTarget(), { _, _, ctx in
-            guard let ctx else { return noErr }
+        // 直接在 Carbon 分发器接收已注册的热键，避免依赖 AppKit 的应用目标转发。
+        let target = GetEventDispatcherTarget()
+        let handlerErr = InstallEventHandler(target, { _, event, ctx in
+            guard let ctx, let event else { return OSStatus(eventNotHandledErr) }
+            var pressed = EventHotKeyID()
+            let parameterErr = GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
+                                                 nil, MemoryLayout<EventHotKeyID>.size, nil, &pressed)
+            guard parameterErr == noErr else {
+                Log.info("⚠️ 热键参数读取失败 \(parameterErr)")
+                return parameterErr
+            }
+            guard pressed.signature == OSType(0x5555_4453), pressed.id == 1 || pressed.id == 2 else {
+                return OSStatus(eventNotHandledErr)
+            }
+            Log.info("收到快捷键 \(pressed.id == 1 ? "⌃⌥⌘9" : "⌃⌥⌘8")")
             let delegate = Unmanaged<AppDelegate>.fromOpaque(ctx).takeUnretainedValue()
-            DispatchQueue.main.async { delegate.coordinator.restorePhysical() }
+            let actionID = pressed.id
+            DispatchQueue.main.async {
+                if actionID == 1 { delegate.coordinator.restorePhysical() }
+                else if actionID == 2 { delegate.coordinator.blackoutPhysical() }
+            }
             return noErr
-        }, 1, &spec, me, nil)
+        }, 1, &spec, me, &hotKeyHandlerRef)
+        guard handlerErr == noErr else {
+            Log.info("⚠️ 快捷键事件处理器安装失败 \(handlerErr)，未注册快捷键")
+            return
+        }
+        Log.info("快捷键事件处理器已安装（Carbon 分发器）")
         let id = EventHotKeyID(signature: OSType(0x5555_4453), id: 1)  // 'UUDS'
         let err = RegisterEventHotKey(UInt32(kVK_ANSI_9), UInt32(cmdKey | optionKey | controlKey), id,
-                                      GetApplicationEventTarget(), 0, &hotKeyRef)
+                                      target, 0, &hotKeyRef)
         Log.info(err == noErr ? "已注册快捷键 ⌃⌥⌘9" : "⚠️ 快捷键 ⌃⌥⌘9 注册失败 \(err)")
+        let offID = EventHotKeyID(signature: OSType(0x5555_4453), id: 2)
+        let offErr = RegisterEventHotKey(UInt32(kVK_ANSI_8), UInt32(cmdKey | optionKey | controlKey), offID,
+                                         target, 0, &blackoutHotKeyRef)
+        Log.info(offErr == noErr ? "已注册快捷键 ⌃⌥⌘8" : "⚠️ 快捷键 ⌃⌥⌘8 注册失败 \(offErr)")
     }
 
     /// 自测：打开设置窗口，依次调用各按钮背后的操作，检查配置变化与窗口尺寸（不经过鼠标点击）
@@ -202,7 +249,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         steps.append(("打开设置窗口", { self.settings.show() }, {
             heights["收起"] = h(); return h() > 200 ? nil : "窗口高度 \(h())" }))
-        steps.append(("展开「设置平板和手机」", { m().toggle(.controller) }, {
+        steps.append(("展开「设置远程设备」", { m().toggle(.controller) }, {
             heights["设备"] = h(); return (m().expanded == .controller && h() > heights["收起"]! + 300) ? nil : "expanded=\(String(describing: m().expanded)) 高度=\(h())" }))
         steps.append(("再点一次收起", { m().toggle(.controller) }, {
             (m().expanded == nil && abs(h() - heights["收起"]!) < 2) ? nil : "高度=\(h())" }))

@@ -1,3 +1,4 @@
+import UUDisplayCore
 // 虚拟屏与物理屏的显示拓扑管理：目标状态 + 逐步收敛
 // 调用方只声明「应该是什么样」（desired），执行器一次只做一步拓扑变化，每步之后等待系统稳定再做下一步。
 // 原因（实测）：重新启用物理屏的热插拔事件尚未处理完时又新建虚拟屏，applySettings 失败，
@@ -19,7 +20,8 @@ final class DisplayManager {
     /// 是否应禁用物理屏（由 Coordinator 按设置与看门狗状态决定）
     var shouldDisablePhysical: () -> Bool = { false }
     /// 用户手动恢复后，本次连接内不再禁用
-    private var physicalOverride = false
+    private var sessionState = RemoteSessionState()
+    private var blackoutFailed = false
 
     // 实际状态
     private var vd: CGVirtualDisplay?
@@ -49,6 +51,10 @@ final class DisplayManager {
     private static let markerURL = ConfigStore.dir.appendingPathComponent("session.json")
 
     var isActive: Bool { vd != nil }
+    var isReady: Bool { !wedged && mainSet && vd.map { DisplayManager.onlineDisplays().contains($0.displayID) && CGDisplayIsMain($0.displayID) != 0 } == true }
+    var keepsPhysicalOn: Bool { sessionState.keepsPhysicalOn }
+    func beginSession() { sessionState.endSession(); blackoutFailed = false }
+    func endSession() { sessionState.endSession() }
     var physicalOff: Bool { PhysicalDisplays.pending != nil }
 
     static func onlineDisplays() -> [CGDirectDisplayID] {
@@ -80,7 +86,6 @@ final class DisplayManager {
     func remove(completion: (() -> Void)? = nil) {
         desired = nil
         failedCfg = nil
-        physicalOverride = false
         if let completion { shutdownCompletion = completion }
         kick()
     }
@@ -89,7 +94,15 @@ final class DisplayManager {
 
     /// 快捷键 / 菜单 / 关闭开关：立即恢复物理屏，虚拟屏保留
     func restorePhysicalNow(override: Bool = true) {
-        if override { physicalOverride = true }
+        if override { sessionState.restoreManually() }
+        kick()
+    }
+
+    /// 用户主动重新熄屏，取消本次保持亮屏；虚拟屏始终保留。
+    func blackoutPhysicalNow() {
+        guard isReady else { return }
+        sessionState.blackoutManually()
+        blackoutFailed = false
         kick()
     }
 
@@ -125,12 +138,13 @@ final class DisplayManager {
     }
 
     /// 在 cgQueue 执行配置事务，回到主线程后进入稳定等待；事务超时则进入保护状态
-    private func runCG(settle: TimeInterval, _ work: @escaping () -> CGError) {
+    private func runCG(settle: TimeInterval, completed: ((CGError) -> Void)? = nil, _ work: @escaping () -> CGError) {
         busy = true
         cgQueue.async {
             let err = work()
             DispatchQueue.main.async {
                 if err == .cannotComplete || err.rawValue == 1014 { self.enterWedged(err) }
+                completed?(err)
                 self.finish(settle: settle)
             }
         }
@@ -223,7 +237,11 @@ final class DisplayManager {
             let online = DisplayManager.onlineDisplays()
             guard online.contains(id) else {
                 waitOnlineTries += 1
-                if waitOnlineTries > 20 { Log.info("⚠️ 虚拟屏 5 秒内未上线"); mainSet = true }
+                if waitOnlineTries > 20 {
+                    Log.info("⚠️ 虚拟屏未能上线，保留物理屏并撤回虚拟屏")
+                    failedCfg = want
+                    desired = nil
+                }
                 busy = true
                 return finish(settle: 0.25)
             }
@@ -232,14 +250,23 @@ final class DisplayManager {
                     .map { ($0, CGDisplayBounds($0).origin) })
             }
             writeMarker()
-            mainSet = true
-            return runCG(settle: 0.5) {
-                let err = applyDisplayConfig { cfg in
+            return runCG(settle: 0.5, completed: { [weak self] err in
+                guard let self else { return }
+                if err == .success {
+                    self.mainSet = true
+                } else {
+                    self.failedCfg = want
+                    self.desired = nil
+                }
+            }) {
+                let err = applyDisplayConfigChecked { cfg in
                     let t = CGDisplayBounds(id).origin
                     for d in online {
                         let o = CGDisplayBounds(d).origin
-                        CGConfigureDisplayOrigin(cfg, d, Int32(o.x - t.x), Int32(o.y - t.y))
+                        let requested = CGConfigureDisplayOrigin(cfg, d, Int32(o.x - t.x), Int32(o.y - t.y))
+                        guard requested == .success else { return requested }
                     }
+                    return .success
                 }
                 Log.info(err == .success ? "✅ 虚拟屏已设为主屏" : "⚠️ 设主屏失败 CGError=\(err.rawValue)")
                 return err
@@ -253,11 +280,23 @@ final class DisplayManager {
             return finish(settle: 1.5)
         }
 
-        let wantOff = shouldDisablePhysical() && !physicalOverride
+        let wantOff = !blackoutFailed && PhysicalDisplays.available && sessionState.wantsPhysicalOff(automaticEnabled: shouldDisablePhysical(), virtualReady: isReady)
+        if wantOff, let disabled = PhysicalDisplays.pending {
+            let online = Set(DisplayManager.onlineDisplays())
+            if disabled.contains(where: { online.contains($0) }) {
+                // 物理屏未关闭或被外部重新点亮，保留亮屏，避免不断争抢屏幕状态。
+                blackoutFailed = true
+                sessionState.restoreManually()
+                Log.info("物理屏仍在线，本次保持亮屏并恢复记录")
+                return runCG(settle: 1.5) { PhysicalDisplays.restore(reason: "物理屏在线") ? .success : .failure }
+            }
+        }
         if wantOff, !physicalOff, let id = vd?.displayID {
             let physical = DisplayManager.onlineDisplays().filter { !DisplayManager.isVirtual($0) }
             if !physical.isEmpty {
-                return runCG(settle: 1.5) {
+                return runCG(settle: 1.5, completed: { [weak self] err in
+                    if err != .success { self?.blackoutFailed = true }
+                }) {
                     let err = PhysicalDisplays.disable(physical)
                     Log.info(err == .success ? "✅ 已关闭物理屏 \(physical)，只保留虚拟屏 #\(id)" : "⚠️ 关闭物理屏失败 CGError=\(err.rawValue)")
                     return err
@@ -272,6 +311,10 @@ final class DisplayManager {
     // MARK: - 单步操作
 
     private func createDisplay(_ cfg: DeviceConfig) -> Bool {
+        guard cfg.validationError == nil else {
+            Log.info("屏幕尺寸无效，取消创建")
+            return false
+        }
         let w = cfg.width, h = cfg.height
         let desc = CGVirtualDisplayDescriptor()
         desc.name = "UUyc companion · \(cfg.name)"  // 显示在 UU 的多显示屏列表、系统显示器设置中
@@ -291,7 +334,13 @@ final class DisplayManager {
         let settings = CGVirtualDisplaySettings()
         settings.hiDPI = cfg.hiDPI
         let mw = cfg.hiDPI ? w / 2 : w, mh = cfg.hiDPI ? h / 2 : h
-        settings.modes = [CGVirtualDisplayMode(width: UInt(mw), height: UInt(mh), refreshRate: 60)]
+        guard let mode = CGVirtualDisplayMode(width: UInt(mw), height: UInt(mh), refreshRate: 60) else {
+            bornAt[display.displayID] = Date()
+            broken.append(display)
+            Log.info("虚拟屏模式创建失败，保留物理屏")
+            return false
+        }
+        settings.modes = [mode]
         guard autoreleasepool(invoking: { display.apply(settings) }) else {
             Log.info("❌ 虚拟屏 applySettings 失败，稳定后释放")
             bornAt[display.displayID] = Date()

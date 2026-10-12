@@ -51,7 +51,7 @@ enum Watchdog {
                 let appExists = hb.map { kill($0.pid, 0) == 0 } ?? false
                 let appHealthy = appExists && (hb?.age ?? .infinity) < appMaxAge
                 // 测试开关：假定 UU 一直连着，用于单独验证心跳超时
-                let uu = assumeUU || UUMonitor.overlayPresent()
+                let uu = assumeUU || UUMonitor.connectionPresent()
                 uuGoneSince = uu ? nil : (uuGoneSince ?? Date())
 
                 if !appHealthy {
@@ -112,6 +112,7 @@ enum WatchdogAgent {
 
     /// 写入（路径变化时更新）并加载；已加载且配置未变则不动
     static func ensureInstalled() {
+        guard !ConfigStore.isIsolated else { return }
         guard FileManager.default.isExecutableFile(atPath: executable.path) else {
             Log.info("⚠️ 找不到看门狗可执行文件，跳过安装：\(executable.path)")
             return
@@ -132,6 +133,7 @@ enum WatchdogAgent {
 
     /// 停止本次登录中的看门狗，保留 LaunchAgent 配置（下次打开 App 或重新登录时恢复）
     static func stopForSession() {
+        guard !ConfigStore.isIsolated else { return }
         guard isLoaded else { return }
         launchctl(["bootout", "\(domain)/\(label)"])
         try? FileManager.default.removeItem(at: Heartbeat.watchdogURL)
@@ -140,6 +142,7 @@ enum WatchdogAgent {
 
     /// 卸载：停止并移除 LaunchAgent（用户在设置里关闭看门狗，或从未开启）
     static func uninstall() {
+        guard !ConfigStore.isIsolated else { return }
         migrateFromSMAppService()
         let loaded = isLoaded
         if loaded { launchctl(["bootout", "\(domain)/\(label)"]) }
