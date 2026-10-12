@@ -51,7 +51,7 @@ enum Watchdog {
                 let appExists = hb.map { kill($0.pid, 0) == 0 } ?? false
                 let appHealthy = appExists && (hb?.age ?? .infinity) < appMaxAge
                 // 测试开关：假定 UU 一直连着，用于单独验证心跳超时
-                let uu = assumeUU || UUMonitor.overlayPresent()
+                let uu = assumeUU || UUMonitor.connectionPresent()
                 uuGoneSince = uu ? nil : (uuGoneSince ?? Date())
 
                 if !appHealthy {

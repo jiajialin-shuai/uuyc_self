@@ -42,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var heartbeatTimer: Timer?
     private var hotKeyRef: EventHotKeyRef?
     private var blackoutHotKeyRef: EventHotKeyRef?
+    private var hotKeyHandlerRef: EventHandlerRef?
     private var demoController: PermissionFlowController?
     private var terminating = false
 
@@ -172,6 +173,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateCancel
     }
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        settings.show()
+        return false
+    }
+
     /// 看门狗以 LaunchAgent 形式安装（KeepAlive）：仅当用户在设置里开启时安装，否则确保已卸载
     private func registerWatchdog() {
         guard Bundle.main.bundlePath.hasSuffix(".app") else {
@@ -189,11 +195,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func installHotkey() {
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         let me = Unmanaged.passUnretained(self).toOpaque()
-        InstallEventHandler(GetApplicationEventTarget(), { _, event, ctx in
-            guard let ctx, let event else { return noErr }
+        // 直接在 Carbon 分发器接收已注册的热键，避免依赖 AppKit 的应用目标转发。
+        let target = GetEventDispatcherTarget()
+        let handlerErr = InstallEventHandler(target, { _, event, ctx in
+            guard let ctx, let event else { return OSStatus(eventNotHandledErr) }
             var pressed = EventHotKeyID()
-            guard GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
-                                    nil, MemoryLayout<EventHotKeyID>.size, nil, &pressed) == noErr else { return noErr }
+            let parameterErr = GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
+                                                 nil, MemoryLayout<EventHotKeyID>.size, nil, &pressed)
+            guard parameterErr == noErr else {
+                Log.info("⚠️ 热键参数读取失败 \(parameterErr)")
+                return parameterErr
+            }
+            guard pressed.signature == OSType(0x5555_4453), pressed.id == 1 || pressed.id == 2 else {
+                return OSStatus(eventNotHandledErr)
+            }
+            Log.info("收到快捷键 \(pressed.id == 1 ? "⌃⌥⌘9" : "⌃⌥⌘8")")
             let delegate = Unmanaged<AppDelegate>.fromOpaque(ctx).takeUnretainedValue()
             let actionID = pressed.id
             DispatchQueue.main.async {
@@ -201,14 +217,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 else if actionID == 2 { delegate.coordinator.blackoutPhysical() }
             }
             return noErr
-        }, 1, &spec, me, nil)
+        }, 1, &spec, me, &hotKeyHandlerRef)
+        guard handlerErr == noErr else {
+            Log.info("⚠️ 快捷键事件处理器安装失败 \(handlerErr)，未注册快捷键")
+            return
+        }
+        Log.info("快捷键事件处理器已安装（Carbon 分发器）")
         let id = EventHotKeyID(signature: OSType(0x5555_4453), id: 1)  // 'UUDS'
         let err = RegisterEventHotKey(UInt32(kVK_ANSI_9), UInt32(cmdKey | optionKey | controlKey), id,
-                                      GetApplicationEventTarget(), 0, &hotKeyRef)
+                                      target, 0, &hotKeyRef)
         Log.info(err == noErr ? "已注册快捷键 ⌃⌥⌘9" : "⚠️ 快捷键 ⌃⌥⌘9 注册失败 \(err)")
         let offID = EventHotKeyID(signature: OSType(0x5555_4453), id: 2)
         let offErr = RegisterEventHotKey(UInt32(kVK_ANSI_8), UInt32(cmdKey | optionKey | controlKey), offID,
-                                         GetApplicationEventTarget(), 0, &blackoutHotKeyRef)
+                                         target, 0, &blackoutHotKeyRef)
         Log.info(offErr == noErr ? "已注册快捷键 ⌃⌥⌘8" : "⚠️ 快捷键 ⌃⌥⌘8 注册失败 \(offErr)")
     }
 
