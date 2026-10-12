@@ -33,7 +33,7 @@
 - [x] 新电脑配置默认值、旧配置兼容、无效尺寸、亮屏覆盖与下一会话重置测试通过（9 项 XCTest）。
 - [x] Release App 构建与签名检查通过（1.1.0，ad-hoc 签名）。
 - [x] 独立数据的离屏设置渲染通过，电脑尺寸、自动处理开关与手动操作入口布局已检查。
-- [ ] 设置界面实际打开，电脑尺寸和自动处理开关可操作。
+- [x] 设置界面实际打开，电脑尺寸和自动处理开关可操作；无效尺寸禁止保存，有效自定义尺寸保存后可回读。
 - [ ] 真实电脑端 UU 连入：虚拟屏工作，iMac 背光熄灭，远程画面和键鼠连续正常。
 - [ ] 远程中手动点亮：远程仍可操作，本次保持亮屏；再次手动熄屏可用。
 - [ ] 断开、重连、程序正常退出与异常退出后恢复正确。
@@ -46,10 +46,14 @@
 
 工具链：系统 `xcode-select` 指向 Command Line Tools，其中没有 XCTest；测试脚本在本次命令内使用已安装的 `/Applications/Xcode-beta.app`，不修改系统选择。App 可用 Command Line Tools 构建。
 
-界面预览：使用 `UUDISPLAY_DATA_DIR=.../build/preview-data` 与 `--preview-settings`，不读取真实设备，不执行显示器切换，不安装后台守护。App 曾启动，CUA 检查时 Mac 锁定，交互验收待解锁。已关闭本次预览进程。
+界面预览：使用 `UUDISPLAY_DATA_DIR=.../build/preview-data` 与 `--preview-settings`，不读取真实设备，不执行显示器切换，不安装后台守护。Mac 解锁后，已实际点击电脑自动处理开关（关闭后尺寸与缩放控件禁用）、打开 1080p/2K/4K/自定义菜单、验证无效宽度 100 禁止保存、有效 2560×1440 保存并回读。已关闭本次预览进程。
 
 离屏布局检查：修复预览的亮/暗外观混用后，已查看设备设置和本机设置 PNG；电脑 1920×1080 和平板 2360×1640 的规格完整显示。快捷键 ⌃⌥⌘8、⌃⌥⌘9 的注册日志成功；按键触发与真实熄屏仍待实测。离屏图片在忽略的 `build/qa/` 中，不包含真实设备信息。
 
-草稿 PR：`https://github.com/jiajialin-shuai/uuyc_self/pull/1`。App 位于 `build/UUyc companion.app`，本地压缩包位于 `dist/uuyc_self-1.1.0.zip`；尚未安装到 Applications 或授权辅助功能。
+草稿 PR：`https://github.com/jiajialin-shuai/uuyc_self/pull/1`。App 位于 `build/UUyc companion.app`，本地压缩包位于 `dist/uuyc_self-1.1.0.zip`。
+
+本机运行准备：已安装到 `/Applications/UUyc companion.app`；用户完成系统授权，App 权限页面与重新启动日志确认已授权，真实 UU 设备列表读取成功。已保存设备设置并开启远程熄屏、后台守护；设置页显示「正在值守」，`launchctl print` 确认守护从 Applications 中的可执行文件运行。用户选择 Windows 电脑作为控制端。
+
+恢复快捷键：注册成功；CUA 发送组合键尚未产生触发日志，不能算按键触发验收，正在等待实体键盘确认。连接验收前先完成此项。App 已保持运行，未由测试创建真实虚拟屏或熄灭物理屏。
 
 真实远程验收尚未进行，不能以单元测试或签名检查证明背光已熄灭或 UU 画面连续。
