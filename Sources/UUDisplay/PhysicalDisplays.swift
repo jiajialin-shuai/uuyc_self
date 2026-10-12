@@ -9,9 +9,18 @@ import Foundation
 /// 同步执行一次显示器配置事务。GUI 进程中不可在主线程调用（会与自身重配置通知死锁）
 @discardableResult
 func applyDisplayConfig(_ body: (CGDisplayConfigRef?) -> Void) -> CGError {
+    applyDisplayConfigChecked { cfg in body(cfg); return .success }
+}
+
+/// 逐项检查配置请求；请求失败时取消事务，不提交部分显示器切换。
+func applyDisplayConfigChecked(_ body: (CGDisplayConfigRef?) -> CGError) -> CGError {
     var cfg: CGDisplayConfigRef?
     guard CGBeginDisplayConfiguration(&cfg) == .success else { return .failure }
-    body(cfg)
+    let requested = body(cfg)
+    guard requested == .success else {
+        CGCancelDisplayConfiguration(cfg)
+        return requested
+    }
     let err = CGCompleteDisplayConfiguration(cfg, .forSession)
     if err != .success { CGCancelDisplayConfiguration(cfg) }
     return err
@@ -41,7 +50,13 @@ enum PhysicalDisplays {
             Log.info("❌ 无法写入物理屏记录，放弃禁用")
             return .failure
         }
-        return applyDisplayConfig { cfg in ids.forEach { _ = setEnabled(cfg, $0, false) } }
+        return applyDisplayConfigChecked { cfg in
+            for id in ids {
+                let err = setEnabled(cfg, id, false)
+                guard err == .success else { return err }
+            }
+            return .success
+        }
     }
 
     /// 按记录重新启用物理屏；成功后删除记录。可在任意进程调用，重复调用无害
@@ -49,7 +64,14 @@ enum PhysicalDisplays {
     static func restore(reason: String) -> Bool {
         guard let ids = pending else { return true }
         guard let setEnabled else { return false }
-        let err = applyDisplayConfig { cfg in ids.forEach { _ = setEnabled(cfg, $0, true) } }
+        let err = applyDisplayConfigChecked { cfg in
+            let online = Set(DisplayManager.onlineDisplays())
+            for id in ids where !online.contains(id) {
+                let err = setEnabled(cfg, id, true)
+                guard err == .success else { return err }
+            }
+            return .success
+        }
         if err == .success {
             try? FileManager.default.removeItem(at: markerURL)
             Log.info("✅ 已恢复物理屏 \(ids)（\(reason)）")

@@ -1,5 +1,6 @@
+import UUDisplayCore
 // 连入/断开 → 选设备配置 → 建屏/还原
-// 设备名通常与连入同秒出现；读不到时先按「上次连入设备」或「默认设备」建屏，名称出现后不一致再重建
+// 设备名通常与连入同秒出现；读不到时只按明确配置的「默认设备」建屏，名称出现后不一致再重建
 import AppKit
 
 final class Coordinator {
@@ -37,17 +38,18 @@ final class Coordinator {
     var statusText: String {
         if display.wedged { return "⛔️ 屏幕设置暂时卡住了，请重启 Mac" }
         if store.config.paused { return "已暂停：连接时不做调整" }
-        guard connected else { return "等待平板或手机连接" }
+        guard connected else { return "等待远程设备连接" }
         let who = controllerName ?? "未知设备"
         if let c = display.current, display.isActive {
-            return "\(who) 已连接 · 屏幕已换成 \(c.sizeLabel)\(display.physicalOff ? " · Mac 屏幕已熄灭" : "")"
+            return "\(who) 已连接 · \(c.sizeLabel)\(display.physicalOff ? " · Mac 屏幕已熄灭" : (display.keepsPhysicalOn ? " · 本次保持亮屏" : ""))"
         }
         return "\(who) 已连接 · 屏幕没有调整"
     }
 
     // MARK: - 事件
 
-    func handleConnect() {
+    func handleConnect(newSession: Bool = true) {
+        if newSession { display.beginSession() }
         connectedAt = Date()
         controllerName = nil
         usedFallback = false
@@ -65,6 +67,7 @@ final class Coordinator {
     func handleDisconnect() {
         namePoll?.invalidate()
         namePoll = nil
+        display.endSession()
         display.remove()
         controllerName = nil
         onChange?()
@@ -79,10 +82,10 @@ final class Coordinator {
             resolve(name)
             return true
         }
-        // 2 秒还没名字：先按上次/默认设备建屏，继续等名字
+        // 2 秒还没名字：只使用明确配置的默认设备，继续等名字
         if elapsed >= 2, !usedFallback {
             usedFallback = true
-            let fallback = store.device(named: store.config.lastDevice) ?? store.device(named: store.config.defaultDevice)
+            let fallback = store.device(named: store.config.defaultDevice)
             Log.info("暂未读到控制端名称，先按「\(fallback?.name ?? "无")」处理")
             apply(fallback)
         }
@@ -127,9 +130,14 @@ final class Coordinator {
 
     private func apply(_ cfg: DeviceConfig?) {
         defer { onChange?() }
-        guard let cfg, cfg.kind != .computer else {
+        guard let cfg, cfg.shouldAdjust else {
             if display.isActive { display.remove() }
-            Log.info(cfg == nil ? "无可用配置，不切换" : "「\(cfg!.name)」是电脑，不切换")
+            Log.info(cfg == nil ? "无可用配置，不切换" : "「\(cfg!.name)」已关闭自动处理，不切换")
+            return
+        }
+        if let error = cfg.validationError {
+            Log.info("「\(cfg.name)」屏幕配置无效：\(error)")
+            display.remove()
             return
         }
         if display.matches(cfg) { return }
@@ -144,7 +152,7 @@ final class Coordinator {
             namePoll?.invalidate()
             display.remove()
         } else if connected {
-            handleConnect()
+            handleConnect(newSession: false)
         }
         onChange?()
     }
@@ -152,7 +160,7 @@ final class Coordinator {
     /// 配置变更后，若正在被控则按新配置重新应用
     func configChanged() {
         if connected, !store.config.paused {
-            if let name = controllerName { resolve(name) } else { handleConnect() }
+            if let name = controllerName { resolve(name) } else { handleConnect(newSession: false) }
         }
         onChange?()
     }
@@ -164,9 +172,21 @@ final class Coordinator {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.onChange?() }
     }
 
+    var canBlackout: Bool { connected && display.isReady && PhysicalDisplays.available && !display.physicalOff }
+
+    func blackoutPhysical() {
+        guard canBlackout else {
+            Log.info("尚未准备好虚拟屏，保留 Mac 屏幕")
+            return
+        }
+        Log.info("手动熄灭物理屏")
+        display.blackoutPhysicalNow()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.onChange?() }
+    }
+
     func setDisablePhysical(_ on: Bool) {
         store.config.disablePhysical = on
-        if on { display.disablePhysicalIfNeeded() } else { display.restorePhysicalNow(override: false) }
+        if on { display.disablePhysicalIfNeeded() } else { display.restorePhysicalNow() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.onChange?() }
     }
 

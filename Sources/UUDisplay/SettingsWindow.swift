@@ -1,3 +1,4 @@
+import UUDisplayCore
 // 设置窗口（上中下结构）
 // 上：工作原理图「控制端 ⇢ 被控 Mac ⇢ 兜底」，点各自按钮向下展开对应面板（同一时间只展开一个）
 // 中：立即恢复所有屏幕 / 权限设置 / 功能导览
@@ -23,12 +24,15 @@ final class SettingsModel: ObservableObject {
     @Published var watchdogRunning = Watchdog.isRunning
     @Published var physicalOff = PhysicalDisplays.pending != nil
     @Published var savedHint = false
+    @Published var canBlackout = false
 
     let devices = WizardModel()
     var onConfigChanged: (() -> Void)?
     var setDisablePhysical: ((Bool) -> Void)?
     var setPaused: ((Bool) -> Void)?
     var restorePhysical: (() -> Void)?
+    var blackoutPhysical: (() -> Void)?
+    var canBlackoutPhysical: (() -> Bool)?
     var openPermissions: (() -> Void)?
     var openTour: (() -> Void)?
     private var timer: Timer?
@@ -49,6 +53,8 @@ final class SettingsModel: ObservableObject {
     func stop() { timer?.invalidate() }
 
     func refresh() {
+        let available = canBlackoutPhysical?() ?? false
+        if available != canBlackout { canBlackout = available }
         let running = Watchdog.isRunning
         if running != watchdogRunning { watchdogRunning = running }
         let off = PhysicalDisplays.pending != nil
@@ -66,13 +72,14 @@ final class SettingsModel: ObservableObject {
     }
 
     func saveDevices() {
-        devices.save()
+        guard devices.save() else { savedHint = false; return }
         onConfigChanged?()
         savedHint = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.savedHint = false }
     }
 
     func toggleLaunchAtLogin(_ on: Bool) {
+        guard !ConfigStore.isIsolated else { return }
         loginError = nil
         do {
             if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
@@ -102,14 +109,16 @@ final class SettingsModel: ObservableObject {
         watchdogEnabled = on
         store.config.watchdogEnabled = on
         Log.info("设置：看门狗 → \(on ? "开" : "关")")
-        if on { WatchdogAgent.ensureInstalled() } else { WatchdogAgent.uninstall() }
+        if !ConfigStore.isIsolated {
+            if on { WatchdogAgent.ensureInstalled() } else { WatchdogAgent.uninstall() }
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.refresh() }
     }
 
     func showAbout() {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "开发版"
         let credits = NSAttributedString(
-            string: "用平板或手机通过 UU远程 操控这台 Mac 时，它会自动准备一块和你的设备尺寸一致的屏幕，让画面刚好铺满；断开后一切恢复原样。\n\n使用的开源组件：PermissionFlow、TourKit、FreeDisplay（均为 MIT 协议）",
+            string: "用电脑、平板或手机通过 UU远程 操控这台 Mac 时，它会自动准备一块和你的设备尺寸一致的屏幕，让画面刚好铺满；断开后一切恢复原样。\n\n使用的开源组件：PermissionFlow、TourKit、FreeDisplay（均为 MIT 协议）",
             attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor])
         NSApp.activate(ignoringOtherApps: true)
         NSApp.orderFrontStandardAboutPanel(options: [
@@ -122,7 +131,7 @@ final class SettingsModel: ObservableObject {
     /// 完全退出：停掉本次登录中的看门狗（不卸载，下次打开 App 或重新登录时恢复），再退出主程序
     func quitCompletely() {
         Log.info("完全退出：停止看门狗并退出主程序")
-        WatchdogAgent.stopForSession()
+        if !ConfigStore.isIsolated { WatchdogAgent.stopForSession() }
         NSApp.terminate(nil)
     }
 }
@@ -229,7 +238,7 @@ private struct DashedConnector: View {
 private struct ControllerIcon: View {
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            Image(systemName: "ipad.landscape")
+            Image(systemName: "laptopcomputer")
                 .resizable().aspectRatio(contentMode: .fit)
                 .frame(width: 112)
                 .offset(x: -8, y: -14)
@@ -297,7 +306,7 @@ struct ControlledPanel: View {
         VStack(alignment: .leading, spacing: 18) {
             Text("设置这台 Mac").font(.title3.bold())
             row("开机时自动打开",
-                "开机后它会安静地待在菜单栏里，平板或手机随时连上都能用。",
+                "开机后它会安静地待在菜单栏里，远程设备随时连上都能用。",
                 isOn: Binding(get: { model.launchAtLogin }, set: { model.toggleLaunchAtLogin($0) }))
             if let err = model.loginError {
                 Text(err).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
@@ -308,7 +317,7 @@ struct ControlledPanel: View {
                 isOn: Binding(get: { model.autoVirtual }, set: { model.toggleAutoVirtual($0) }))
             Divider()
             row("远程时熄灭 Mac 的屏幕",
-                "远程期间，Mac 自带的屏幕和外接显示器会暂时熄灭，只留下那块虚拟屏幕，打开的窗口不会跑到你看不见的地方。断开后屏幕会自动亮回来。用电脑连接时不受影响。万一屏幕没有亮回来，可以看看「找回屏幕的方法」。",
+                "远程期间，Mac 自带的屏幕和外接显示器会暂时熄灭，只留下那块虚拟屏幕，打开的窗口不会跑到你看不见的地方。断开后屏幕会自动亮回来。电脑也可按设备设置自动处理；手动恢复后，本次连接保持亮屏。万一屏幕没有亮回来，可以看看「找回屏幕的方法」。",
                 isOn: Binding(get: { model.disablePhysical }, set: { model.toggleDisablePhysical($0) }),
                 enabled: model.autoVirtual)
             if !model.autoVirtual {
@@ -413,7 +422,7 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             // 上：工作原理图
             HStack(alignment: .top, spacing: 0) {
-                FlowNode(caption: "你的平板和手机", buttonTitle: "设置平板和手机",
+                FlowNode(caption: "电脑、平板和手机", buttonTitle: "设置远程设备",
                          selected: model.expanded == .controller, action: { model.toggle(.controller) }) {
                     ControllerIcon()
                 }
@@ -451,7 +460,12 @@ struct SettingsView: View {
                     Label("立即恢复所有屏幕", systemImage: "display.2")
                 }
                 .disabled(!model.physicalOff)
-                .help(model.physicalOff ? "也可以按 ⌃ control + ⌥ option + ⌘ command + 9" : "现在没有熄灭的屏幕")
+                .help(model.physicalOff ? "也可以按 ⌃⌥⌘9；本次连接保持亮屏，远程继续使用虚拟屏" : "现在没有熄灭的屏幕")
+                Button { model.blackoutPhysical?() } label: {
+                    Label("立即熄灭 Mac 屏幕", systemImage: "display")
+                }
+                .disabled(!model.canBlackout)
+                .help("虚拟屏准备好后可用，也可以按 ⌃⌥⌘8；再次熄屏会取消本次保持亮屏")
                 Button { model.openPermissions?() } label: { Label("权限设置", systemImage: "hand.raised") }
                 Button { model.openTour?() } label: { Label("功能介绍", systemImage: "sparkles") }
             }
@@ -487,6 +501,8 @@ final class SettingsWindowController {
     var setDisablePhysical: ((Bool) -> Void)?
     var setPaused: ((Bool) -> Void)?
     var restorePhysical: (() -> Void)?
+    var blackoutPhysical: (() -> Void)?
+    var canBlackoutPhysical: (() -> Bool)?
 
     /// - Parameter pane: 打开时展开的面板，nil 表示全部收起
     func show(pane: SettingsPane? = nil) {
@@ -502,6 +518,8 @@ final class SettingsWindowController {
         model.setDisablePhysical = setDisablePhysical
         model.setPaused = setPaused
         model.restorePhysical = restorePhysical
+        model.blackoutPhysical = blackoutPhysical
+        model.canBlackoutPhysical = canBlackoutPhysical
         model.openPermissions = openPermissions
         model.openTour = openTour
         model.start()
