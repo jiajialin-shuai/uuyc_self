@@ -97,13 +97,14 @@ struct DeviceRow: View {
                     ForEach(Presets.all.filter { $0.kind == cfg.kind }) { Text($0.label).tag($0.id) }
                     Text("自定义").tag(Presets.customID)
                 }
-                .frame(width: 240)
+                .frame(width: 340)
                 if cfg.presetID == nil {
                     TextField("宽", value: $cfg.width, format: .number.grouping(.never)).frame(width: 70)
                     Text("×")
                     TextField("高", value: $cfg.height, format: .number.grouping(.never)).frame(width: 70)
                 }
                 Toggle("高清缩放", isOn: $cfg.hiDPI)
+                    .help("开启后文字更清晰，界面也更大；电脑可先关闭，再按需要调整。")
                 Spacer()
             }
             .disabled(!cfg.shouldAdjust)
@@ -146,7 +147,7 @@ struct WizardView: View {
             }
             .frame(minHeight: 220)
             HStack {
-                TextField("手动添加设备（名字要和 UU远程 里显示的一样）", text: $model.newName).frame(width: 260)
+                TextField("设备名（与 UU 显示一致）", text: $model.newName).frame(width: 260)
                 Button("添加", action: model.addManual)
                 Spacer()
             }

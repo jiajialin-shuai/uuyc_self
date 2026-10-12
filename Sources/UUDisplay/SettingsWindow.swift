@@ -118,7 +118,7 @@ final class SettingsModel: ObservableObject {
     func showAbout() {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "开发版"
         let credits = NSAttributedString(
-            string: "用电脑、平板或手机通过 UU远程 操控这台 Mac 时，它会自动准备一块和你的设备尺寸一致的屏幕，让画面刚好铺满；断开后一切恢复原样。\n\n使用的开源组件：PermissionFlow、TourKit、FreeDisplay（均为 MIT 协议）",
+            string: "用电脑、平板或手机通过 UU远程 操控这台 Mac 时，它会按设备设置准备虚拟屏幕；断开后恢复 Mac 屏幕和显示器布局。\n\n使用的开源组件：PermissionFlow、TourKit、FreeDisplay（均为 MIT 协议）",
             attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor])
         NSApp.activate(ignoringOtherApps: true)
         NSApp.orderFrontStandardAboutPanel(options: [
@@ -313,7 +313,7 @@ struct ControlledPanel: View {
             }
             Divider()
             row("自动准备虚拟屏幕",
-                "平板或手机连上这台 Mac 时，自动准备一块和它尺寸一致的屏幕，远程画面刚好铺满、文字清晰；断开后自动收起。关掉后，连上时不做任何调整。",
+                "远程设备连上这台 Mac 时，按设备设置准备虚拟屏幕；断开后自动收起。关掉后，连上时不做任何调整。",
                 isOn: Binding(get: { model.autoVirtual }, set: { model.toggleAutoVirtual($0) }))
             Divider()
             row("远程时熄灭 Mac 的屏幕",
@@ -561,7 +561,10 @@ final class SettingsWindowController {
             model.watchdogEnabled = watchdog
             model.watchdogRunning = false
             model.expanded = pane
-            let view = NSHostingView(rootView: SettingsView(model: model, forRender: true))
+            let view = NSHostingView(rootView: SettingsView(model: model, forRender: true)
+                .environment(\.colorScheme, .light)
+                .background(Color(red: 0.96, green: 0.96, blue: 0.96)))
+            view.appearance = NSAppearance(named: .aqua)
             view.frame = NSRect(origin: .zero, size: view.fittingSize)
             view.layoutSubtreeIfNeeded()
             RunLoop.main.run(until: Date().addingTimeInterval(0.3))

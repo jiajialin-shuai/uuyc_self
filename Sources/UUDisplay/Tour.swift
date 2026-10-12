@@ -7,7 +7,7 @@ import TourKit
 enum Tour {
     static let pages: [(image: String, title: LocalizedStringKey, description: LocalizedStringKey)] = [
         ("tour-welcome", "欢迎使用 UU远程伴侣",
-         "用电脑、平板或手机通过 UU远程 操控这台 Mac 时，它会自动准备一块和你的设备尺寸完全一致的屏幕。"),
+         "用电脑、平板或手机通过 UU远程 操控这台 Mac 时，它会按设备设置准备虚拟屏幕。"),
         ("tour-match", "一连上，画面就刚好铺满",
          "认出连进来的是哪台设备，几秒内换上合适的屏幕，没有黑边、文字清晰；断开后一切恢复原样。"),
         ("tour-physical", "远程时只留一块屏幕",
